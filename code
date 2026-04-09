@@ -1,0 +1,146 @@
+import tkinter as tk
+import sounddevice as sd
+import numpy as np
+import librosa
+import scipy.signal
+from sklearn.cluster import KMeans
+import tkinter as tk
+from PIL import Image, ImageTk
+
+shruti_table = {
+    "C": 261.63,
+    "C#": 277.18,
+    "D": 293.66,
+    "D#": 311.13,
+    "E": 329.63,
+    "F": 349.23,
+    "F#": 369.99,
+    "G": 392.00,
+    "G#": 415.30,
+    "A": 440.00,
+    "A#": 466.16
+}
+
+def detect_shruti():
+    #audio collecting
+    duration = 60 
+    sr = 22050
+    #audio collection
+    print("loading...")
+    audio = sd.rec(int(duration * sr), samplerate=sr, channels=1)
+    sd.wait()
+
+    audio = audio.flatten()
+    #audio cleaning
+    f0, voiced_flag, _ = librosa.pyin(
+        audio,
+        fmin=librosa.note_to_hz('C2'),
+        fmax=librosa.note_to_hz('C6')
+    )
+
+    # Remove unvoiced parts
+    f0_clean = f0[voiced_flag]
+
+    # Smooth the pitch
+    f0_smooth = scipy.signal.medfilt(f0_clean, kernel_size=5)
+
+    low = np.percentile(f0_smooth, 5)
+    high = np.percentile(f0_smooth, 95)
+
+    f0_filtered = f0_smooth[(f0_smooth > low) & (f0_smooth < high)]
+
+
+    #classifying into clusters based on pitches
+    data = f0_filtered.reshape(-1, 1)
+
+    kmeans = KMeans(n_clusters=3, random_state=0).fit(data)
+    centers = sorted(kmeans.cluster_centers_.flatten())
+
+    sa_low = centers[0]
+    pa = centers[1]
+    sa_high = centers[2]
+
+    pa_ratio = pa / sa_low
+    sa_ratio = sa_high / sa_low
+
+    print("\n--- Detected Frequencies ---")
+    print(f"Sa (low): {sa_low:.2f} Hz")
+    print(f"Pa: {pa:.2f} Hz")
+    print(f"Sa (high): {sa_high:.2f} Hz")
+
+    print("\n--- Ratios ---")
+    print(f"Pa / Sa ≈ {pa_ratio:.2f} (expected ~1.5)")
+    print(f"High Sa / Sa ≈ {sa_ratio:.2f} (expected ~2.0)")
+    shruti_freq = sa_low
+
+        # Normalize to middle octave
+    while shruti_freq < 250:
+        shruti_freq *= 2
+
+    while shruti_freq > 500:
+        shruti_freq /= 2
+    closest_note = min(
+        shruti_table,
+        key=lambda note: abs(shruti_freq - shruti_table[note])
+
+    )
+    if len(f0_clean) < 20:
+        return "No voice detected", 0
+
+    closest_freq = shruti_table[closest_note]
+
+    print("\n Your Shruti:")
+    print(f"Note: {closest_note}")
+    print(f"Reference Frequency: {closest_freq} Hz")
+    print(f"Detected Frequency: {shruti_freq:.2f} Hz")
+    return closest_note,closest_freq
+
+def on_click():
+    note, freq = detect_shruti()
+
+    result_label.config(text=f"{note}")
+    freq_label.config(text=f"{freq:.2f} Hz")
+# UI 
+root = tk.Tk()
+root.title("Shruti Detector")
+root.geometry("400x300")
+
+bg_img = Image.open("download.png")
+bg_img = bg_img.resize((400, 300))
+bg_photo = ImageTk.PhotoImage(bg_img)
+
+bg_label = tk.Label(root, image=bg_photo)
+bg_label.place(x=0, y=0, relwidth=1, relheight=1)
+
+title = tk.Label(root, text="Shruti Detector 🎤",
+                 font=("Arial", 16, "bold"),
+                 bg="black", fg="white")
+title.pack(pady=10)
+
+button = tk.Button(root,
+                   text="Start Singing Sa-Pa-SA-Pa-Sa",
+                   command=on_click,
+                   bg="black",
+                   fg="white")
+button.pack(pady=10)
+
+status_label = tk.Label(root,
+                        text="Click to begin",
+                        bg="black",
+                        fg="cyan")
+status_label.pack()
+
+result_label = tk.Label(root,
+                        text="--",
+                        font=("Arial", 24, "bold"),
+                        bg="black",
+                        fg="cyan")
+result_label.pack(pady=15)
+
+freq_label = tk.Label(root,
+                      text="-- Hz",
+                      bg="black",
+                      fg="white")
+freq_label.pack()
+
+root.mainloop()
